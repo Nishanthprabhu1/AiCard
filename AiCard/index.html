@@ -903,23 +903,47 @@
       renderCatalog();
 
       /* ---------- AR camera pause/resume ---------- */
-      function pauseCamera() {
-        try {
-          const arSystem = sceneEl.systems && sceneEl.systems["mindar-image-system"];
-          if (arSystem && typeof arSystem.pause === "function") arSystem.pause(false);
-          // Disable MindAR's own camera tracks so the camera light turns off
-          const arStream = arSystem && arSystem.video && arSystem.video.srcObject;
-          if (arStream) arStream.getTracks().forEach(t => { t.enabled = false; });
-        } catch (err) { console.warn("Could not pause AR camera:", err); }
-        stopRawCameraFeed();
+      let arRunning = true;
+      let arBusy = false;
+
+      function getArSystem() {
+        return sceneEl.systems && sceneEl.systems["mindar-image-system"];
       }
-      function resumeCamera() {
+
+      // Fully release the camera (MindAR stop() ends every camera track)
+      async function pauseCamera() {
+        stopRawCameraFeed();
+        if (arBusy || !arRunning) return;
+        const arSystem = getArSystem();
+        if (!arSystem || !arSystem.video) return; // AR not started yet
+        arBusy = true;
         try {
-          const arSystem = sceneEl.systems && sceneEl.systems["mindar-image-system"];
-          const arStream = arSystem && arSystem.video && arSystem.video.srcObject;
-          if (arStream) arStream.getTracks().forEach(t => { t.enabled = true; });
-          if (arSystem && typeof arSystem.unpause === "function") arSystem.unpause();
-        } catch (err) { console.warn("Could not resume AR camera:", err); }
+          arSystem.stop();
+          // Safety net: make sure no camera track is left running
+          document.querySelectorAll("video").forEach(v => {
+            const s = v.srcObject;
+            if (s && s.getTracks) s.getTracks().forEach(t => t.stop());
+          });
+          arRunning = false;
+        } catch (err) {
+          console.warn("Could not stop AR camera:", err);
+        }
+        arBusy = false;
+      }
+
+      // Re-open the camera and restart AR tracking
+      async function resumeCamera() {
+        if (arBusy || arRunning) return;
+        const arSystem = getArSystem();
+        if (!arSystem) return;
+        arBusy = true;
+        try {
+          await arSystem.start();
+          arRunning = true;
+        } catch (err) {
+          console.warn("Could not restart AR camera:", err);
+        }
+        arBusy = false;
         startRawCameraFeed();
       }
 
