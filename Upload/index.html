@@ -21,7 +21,6 @@ input:focus,select:focus{border-color:var(--gold)}
 .drop.drag{background:rgba(229,193,88,.08);border-color:var(--gold)}
 .drop strong{display:block;color:var(--gold2);font-size:12px}.drop span{font-size:11px;color:var(--muted)}
 
-/* Dynamic Image Grid with Per-Image Remove Button */
 .preview{display:grid;grid-template-columns:repeat(4,1fr);gap:9px;margin-top:12px}
 .preview-item{position:relative;width:100%;aspect-ratio:1;border-radius:9px;overflow:hidden;border:1px solid var(--line)}
 .preview-item img{width:100%;height:100%;object-fit:cover;display:block}
@@ -70,7 +69,6 @@ input:focus,select:focus{border-color:var(--gold)}
         <option>Bridal Collection</option>
         <option>Necklace</option>
         <option>Rings</option>
-        <option value="OGA1">OGA1</option>
       </select>
 
       <div class="drop" id="drop">
@@ -90,8 +88,7 @@ input:focus,select:focus{border-color:var(--gold)}
         <b>Bangles</b> → Bangles folder<br>
         <b>Bridal Collection</b> → Bridal Collection folder<br>
         <b>Necklace</b> → Necklace folder<br>
-        <b>Rings</b> → Rings folder<br>
-        <b>OGA1</b> → Not configured
+        <b>Rings</b> → Rings folder
       </div>
 
       <div class="actions">
@@ -105,13 +102,13 @@ input:focus,select:focus{border-color:var(--gold)}
   <section class="media-section">
     <div class="media-title">
       <h2>AR EXPERIENCE MEDIA (CARD TARGET)</h2>
-      <span>AI Experience Media</span>
+      <span>Auto-Compressed for Low Latency & Smooth Playback</span>
     </div>
 
     <div class="video-drop" id="videoDrop">
       <div id="videoPlaceholder">
         <strong style="display:block;color:var(--gold2);font-size:12px">🎬 DROP AR VIDEO HERE</strong>
-        <span style="font-size:11px;color:var(--muted)">MP4 / WebM • Max 25MB recommended</span>
+        <span style="font-size:11px;color:var(--muted)">MP4 / WebM / MOV • Automatically compressed for fast WebAR streaming</span>
       </div>
       <video id="videoPreview" controls playsinline muted style="display:none"></video>
     </div>
@@ -121,14 +118,13 @@ input:focus,select:focus{border-color:var(--gold)}
 
     <div class="video-actions">
       <button class="btn dark" id="clearVideo" type="button">CLEAR VIDEO</button>
-      <button class="btn gold" id="uploadVideo" type="button">UPLOAD AR VIDEO TRACK</button>
+      <button class="btn gold" id="uploadVideo" type="button">COMPRESS & UPLOAD AR VIDEO</button>
     </div>
     <div class="status" id="videoStatus"></div>
   </section>
 </div>
 
 <script>
-// Deployed Google Apps Script endpoints
 const IMAGE_APPS_SCRIPT_URL = "https://script.google.com/macros/s/AKfycbxy00k2Wyp-e-bfmeiaUaR8teIW36YnFpRmRILXoxZSuG_4UpCTObzLDxWSCvuPAbOt/exec";
 const VIDEO_APPS_SCRIPT_URL = "https://script.google.com/macros/s/AKfycbyngfPB7bGYIKPDDjK6ZSumck8AcnX586OISrt0AfPAzzibiFNS0GmqO3QF9q5C464K/exec";
 
@@ -257,10 +253,9 @@ document.getElementById("upload").onclick = async () => {
   }
 };
 
-// ---------- AR EXPERIENCE MEDIA / VIDEO UPLOAD ----------
-const AR_VIDEO_FOLDER_ID = "1jRyVReP4cq7yk1VqwdFCMt0w4on4S77Q";
-const MAX_VIDEO_SIZE_MB = 25;
-
+// ==========================================
+// CLIENT-SIDE VIDEO COMPRESSION ENGINE
+// ==========================================
 const videoDrop = document.getElementById("videoDrop");
 const videoFileEl = document.getElementById("videoFile");
 const videoPreview = document.getElementById("videoPreview");
@@ -288,16 +283,12 @@ videoFileEl.addEventListener("change", () => {
 });
 
 function setVideo(file) {
-  const sizeMB = file.size / (1024 * 1024);
-  if (sizeMB > MAX_VIDEO_SIZE_MB) {
-    alert(`File is ${sizeMB.toFixed(1)}MB. Apps Script limits uploads over ${MAX_VIDEO_SIZE_MB}MB. Please compress your video first.`);
-    return;
-  }
   selectedVideo = file;
+  const sizeMB = (file.size / (1024 * 1024)).toFixed(1);
   videoPreview.src = URL.createObjectURL(file);
   videoPreview.style.display = "block";
   videoPlaceholder.style.display = "none";
-  videoName.textContent = `${file.name} (${sizeMB.toFixed(1)} MB)`;
+  videoName.textContent = `${file.name} (${sizeMB} MB) • Ready for compression`;
   videoStatus.textContent = "";
 }
 
@@ -315,6 +306,98 @@ function clearVideo() {
 
 clearVideoBtn.addEventListener("click", clearVideo);
 
+/**
+ * Compresses video by downsampling resolution (Max 720px width)
+ * and transcoding with low bitrate (800kbps) via MediaRecorder.
+ */
+function compressVideoFile(file, onProgress) {
+  return new Promise((resolve, reject) => {
+    const video = document.createElement("video");
+    video.src = URL.createObjectURL(file);
+    video.muted = true;
+    video.playsInline = true;
+
+    video.onloadedmetadata = () => {
+      // 1. Calculate optimized dimensions (Scale down to max 720p)
+      const MAX_WIDTH = 720;
+      let width = video.videoWidth || 640;
+      let height = video.videoHeight || 480;
+
+      if (width > MAX_WIDTH) {
+        height = Math.round((height * MAX_WIDTH) / width);
+        width = MAX_WIDTH;
+      }
+      // Ensure dimensions are even numbers for encoders
+      if (width % 2 !== 0) width--;
+      if (height % 2 !== 0) height--;
+
+      const canvas = document.createElement("canvas");
+      canvas.width = width;
+      canvas.height = height;
+      const ctx = canvas.getContext("2d");
+
+      // 2. Capture canvas stream at 25 fps
+      const stream = canvas.captureStream(25);
+      
+      // Determine optimal browser codec
+      let mimeType = "video/webm;codecs=vp8";
+      if (!MediaRecorder.isTypeSupported(mimeType)) {
+        mimeType = MediaRecorder.isTypeSupported("video/mp4") ? "video/mp4" : "video/webm";
+      }
+
+      // Bitrate set to 800 kbps for fast loading on 3G/4G
+      const recorder = new MediaRecorder(stream, {
+        mimeType: mimeType,
+        videoBitsPerSecond: 800000 
+      });
+
+      const chunks = [];
+      recorder.ondataavailable = e => {
+        if (e.data && e.data.size > 0) chunks.push(e.data);
+      };
+
+      recorder.onstop = () => {
+        const compressedBlob = new Blob(chunks, { type: mimeType });
+        URL.revokeObjectURL(video.src);
+        resolve(compressedBlob);
+      };
+
+      recorder.onerror = err => {
+        URL.revokeObjectURL(video.src);
+        reject(err);
+      };
+
+      recorder.start(100);
+
+      // 3. Process video playback into canvas
+      let animId = null;
+      function drawFrame() {
+        if (video.paused || video.ended) return;
+        ctx.drawImage(video, 0, 0, width, height);
+
+        if (onProgress && video.duration) {
+          const pct = Math.round((video.currentTime / video.duration) * 100);
+          onProgress(pct);
+        }
+        animId = requestAnimationFrame(drawFrame);
+      }
+
+      video.onplay = () => { drawFrame(); };
+      video.onended = () => {
+        cancelAnimationFrame(animId);
+        recorder.stop();
+      };
+
+      video.play().catch(reject);
+    };
+
+    video.onerror = err => {
+      URL.revokeObjectURL(video.src);
+      reject(err);
+    };
+  });
+}
+
 uploadVideoBtn.addEventListener("click", async () => {
   if (!selectedVideo) {
     alert("Please select an AR video first.");
@@ -326,15 +409,32 @@ uploadVideoBtn.addEventListener("click", async () => {
   }
 
   uploadVideoBtn.disabled = true;
-  videoStatus.textContent = "Uploading AR video (this may take up to a minute)…";
 
   try {
-    const data = await readAsDataURL(selectedVideo);
+    const originalSizeMB = (selectedVideo.size / (1024 * 1024)).toFixed(2);
+    videoStatus.textContent = `Compressing video for low-bandwidth streaming (0%)…`;
+
+    // 1. Run local compression
+    const compressedBlob = await compressVideoFile(selectedVideo, pct => {
+      videoStatus.textContent = `Optimizing & compressing frames: ${pct}%…`;
+    });
+
+    const compressedSizeMB = (compressedBlob.size / (1024 * 1024)).toFixed(2);
+    videoStatus.textContent = `Compressed from ${originalSizeMB}MB → ${compressedSizeMB}MB. Uploading…`;
+
+    // 2. Read compressed blob as Base64 Data URL
+    const data = await readAsDataURL(compressedBlob);
+
+    // 3. Prepare payload for Google Drive
+    const cleanBaseName = selectedVideo.name.replace(/\.[^/.]+$/, "");
+    const ext = compressedBlob.type.includes("mp4") ? ".mp4" : ".webm";
+    const finalFileName = `${cleanBaseName}_low_bandwidth${ext}`;
+
     const payload = {
       action: "uploadARVideo",
       folderId: AR_VIDEO_FOLDER_ID,
-      fileName: selectedVideo.name,
-      mimeType: selectedVideo.type || "video/mp4",
+      fileName: finalFileName,
+      mimeType: compressedBlob.type,
       data
     };
 
@@ -347,11 +447,11 @@ uploadVideoBtn.addEventListener("click", async () => {
     const result = await res.json();
     if (!result.success) throw new Error(result.error || "Server rejected video upload.");
 
-    videoStatus.textContent = "✓ AR video uploaded successfully.";
+    videoStatus.textContent = `✓ Uploaded! Compressed to ${compressedSizeMB}MB for fast streaming.`;
   } catch (err) {
     console.error(err);
-    videoStatus.textContent = "Upload failed: " + err.message;
-    alert("AR video upload failed. Ensure the Apps Script is deployed as 'Anyone' and file is under 25MB.");
+    videoStatus.textContent = "Upload/Compression failed: " + err.message;
+    alert("Failed: " + err.message);
   } finally {
     uploadVideoBtn.disabled = false;
   }
