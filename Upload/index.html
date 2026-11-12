@@ -102,13 +102,13 @@ input:focus,select:focus{border-color:var(--gold)}
   <section class="media-section">
     <div class="media-title">
       <h2>AR EXPERIENCE MEDIA (CARD TARGET)</h2>
-      <span>Auto-Compressed for Low Latency & Smooth Playback</span>
+      <span>Auto-Compressed for Fast Streaming</span>
     </div>
 
     <div class="video-drop" id="videoDrop">
       <div id="videoPlaceholder">
         <strong style="display:block;color:var(--gold2);font-size:12px">🎬 DROP AR VIDEO HERE</strong>
-        <span style="font-size:11px;color:var(--muted)">MP4 / WebM / MOV • Automatically compressed for fast WebAR streaming</span>
+        <span style="font-size:11px;color:var(--muted)">MP4 / WebM / MOV • Auto-compressed for low internet bandwidth</span>
       </div>
       <video id="videoPreview" controls playsinline muted style="display:none"></video>
     </div>
@@ -125,8 +125,14 @@ input:focus,select:focus{border-color:var(--gold)}
 </div>
 
 <script>
+// ====================================================
+// 1. CONFIGURATION & DESTINATION IDS
+// ====================================================
 const IMAGE_APPS_SCRIPT_URL = "https://script.google.com/macros/s/AKfycbxy00k2Wyp-e-bfmeiaUaR8teIW36YnFpRmRILXoxZSuG_4UpCTObzLDxWSCvuPAbOt/exec";
 const VIDEO_APPS_SCRIPT_URL = "https://script.google.com/macros/s/AKfycbyngfPB7bGYIKPDDjK6ZSumck8AcnX586OISrt0AfPAzzibiFNS0GmqO3QF9q5C464K/exec";
+
+// Google Drive Folder IDs
+const AR_VIDEO_FOLDER_ID = "1jRyVReP4cq7yk1VqwdFCMt0w4on4S77Q";
 
 const FOLDERS = {
   "Bangles": "1loeb_40A3eOjzB2PnY24MXsxKFsE06L-",
@@ -135,6 +141,9 @@ const FOLDERS = {
   "Rings": "1Xz92BSq1jtdxJyiKO5o7lzx0bepnDQzz"
 };
 
+// ====================================================
+// 2. PRODUCT IMAGE GALLERY MANAGEMENT
+// ====================================================
 const drop = document.getElementById("drop");
 const filesEl = document.getElementById("files");
 const preview = document.getElementById("preview");
@@ -195,12 +204,12 @@ document.getElementById("clear").onclick = () => {
   statusEl.textContent = "";
 };
 
-function readAsDataURL(file) {
+function readAsDataURL(blob) {
   return new Promise((resolve, reject) => {
     const reader = new FileReader();
     reader.onload = () => resolve(reader.result);
     reader.onerror = reject;
-    reader.readAsDataURL(file);
+    reader.readAsDataURL(blob);
   });
 }
 
@@ -211,9 +220,6 @@ document.getElementById("upload").onclick = async () => {
   if (!category) return alert("Please select Product Category.");
   if (!FOLDERS[category]) return alert("No Google Drive folder has been configured for " + category + ".");
   if (!selected.length) return alert("Please select at least one catalogue image.");
-  if (!IMAGE_APPS_SCRIPT_URL || !IMAGE_APPS_SCRIPT_URL.startsWith("https://")) {
-    return alert("Image Google Apps Script Web App URL is missing or invalid.");
-  }
 
   const btn = document.getElementById("upload");
   btn.disabled = true;
@@ -247,15 +253,15 @@ document.getElementById("upload").onclick = async () => {
   } catch (err) {
     console.error(err);
     statusEl.textContent = "Upload failed: " + err.message;
-    alert("Upload failed. Check the Apps Script deployment and Drive permissions.");
+    alert("Upload failed. Check Apps Script deployment and permissions.");
   } finally {
     btn.disabled = false;
   }
 };
 
-// ==========================================
-// CLIENT-SIDE VIDEO COMPRESSION ENGINE
-// ==========================================
+// ====================================================
+// 3. AR VIDEO COMPRESSION & DRIVE UPLOADER
+// ====================================================
 const videoDrop = document.getElementById("videoDrop");
 const videoFileEl = document.getElementById("videoFile");
 const videoPreview = document.getElementById("videoPreview");
@@ -288,7 +294,7 @@ function setVideo(file) {
   videoPreview.src = URL.createObjectURL(file);
   videoPreview.style.display = "block";
   videoPlaceholder.style.display = "none";
-  videoName.textContent = `${file.name} (${sizeMB} MB) • Ready for compression`;
+  videoName.textContent = `${file.name} (${sizeMB} MB)`;
   videoStatus.textContent = "";
 }
 
@@ -306,10 +312,6 @@ function clearVideo() {
 
 clearVideoBtn.addEventListener("click", clearVideo);
 
-/**
- * Compresses video by downsampling resolution (Max 720px width)
- * and transcoding with low bitrate (800kbps) via MediaRecorder.
- */
 function compressVideoFile(file, onProgress) {
   return new Promise((resolve, reject) => {
     const video = document.createElement("video");
@@ -318,7 +320,6 @@ function compressVideoFile(file, onProgress) {
     video.playsInline = true;
 
     video.onloadedmetadata = () => {
-      // 1. Calculate optimized dimensions (Scale down to max 720p)
       const MAX_WIDTH = 720;
       let width = video.videoWidth || 640;
       let height = video.videoHeight || 480;
@@ -327,7 +328,6 @@ function compressVideoFile(file, onProgress) {
         height = Math.round((height * MAX_WIDTH) / width);
         width = MAX_WIDTH;
       }
-      // Ensure dimensions are even numbers for encoders
       if (width % 2 !== 0) width--;
       if (height % 2 !== 0) height--;
 
@@ -336,16 +336,13 @@ function compressVideoFile(file, onProgress) {
       canvas.height = height;
       const ctx = canvas.getContext("2d");
 
-      // 2. Capture canvas stream at 25 fps
       const stream = canvas.captureStream(25);
       
-      // Determine optimal browser codec
       let mimeType = "video/webm;codecs=vp8";
       if (!MediaRecorder.isTypeSupported(mimeType)) {
         mimeType = MediaRecorder.isTypeSupported("video/mp4") ? "video/mp4" : "video/webm";
       }
 
-      // Bitrate set to 800 kbps for fast loading on 3G/4G
       const recorder = new MediaRecorder(stream, {
         mimeType: mimeType,
         videoBitsPerSecond: 800000 
@@ -369,12 +366,10 @@ function compressVideoFile(file, onProgress) {
 
       recorder.start(100);
 
-      // 3. Process video playback into canvas
       let animId = null;
       function drawFrame() {
         if (video.paused || video.ended) return;
         ctx.drawImage(video, 0, 0, width, height);
-
         if (onProgress && video.duration) {
           const pct = Math.round((video.currentTime / video.duration) * 100);
           onProgress(pct);
@@ -412,20 +407,16 @@ uploadVideoBtn.addEventListener("click", async () => {
 
   try {
     const originalSizeMB = (selectedVideo.size / (1024 * 1024)).toFixed(2);
-    videoStatus.textContent = `Compressing video for low-bandwidth streaming (0%)…`;
+    videoStatus.textContent = "Compressing video for low-bandwidth playback (0%)…";
 
-    // 1. Run local compression
     const compressedBlob = await compressVideoFile(selectedVideo, pct => {
-      videoStatus.textContent = `Optimizing & compressing frames: ${pct}%…`;
+      videoStatus.textContent = `Compressing video: ${pct}%…`;
     });
 
     const compressedSizeMB = (compressedBlob.size / (1024 * 1024)).toFixed(2);
-    videoStatus.textContent = `Compressed from ${originalSizeMB}MB → ${compressedSizeMB}MB. Uploading…`;
+    videoStatus.textContent = `Optimized: ${originalSizeMB}MB → ${compressedSizeMB}MB. Uploading…`;
 
-    // 2. Read compressed blob as Base64 Data URL
     const data = await readAsDataURL(compressedBlob);
-
-    // 3. Prepare payload for Google Drive
     const cleanBaseName = selectedVideo.name.replace(/\.[^/.]+$/, "");
     const ext = compressedBlob.type.includes("mp4") ? ".mp4" : ".webm";
     const finalFileName = `${cleanBaseName}_low_bandwidth${ext}`;
@@ -435,7 +426,7 @@ uploadVideoBtn.addEventListener("click", async () => {
       folderId: AR_VIDEO_FOLDER_ID,
       fileName: finalFileName,
       mimeType: compressedBlob.type,
-      data
+      data: data
     };
 
     const res = await fetch(VIDEO_APPS_SCRIPT_URL, {
@@ -445,13 +436,13 @@ uploadVideoBtn.addEventListener("click", async () => {
     });
 
     const result = await res.json();
-    if (!result.success) throw new Error(result.error || "Server rejected video upload.");
+    if (!result.success) throw new Error(result.error || "Server upload failed.");
 
-    videoStatus.textContent = `✓ Uploaded! Compressed to ${compressedSizeMB}MB for fast streaming.`;
+    videoStatus.textContent = `✓ Uploaded successfully (${compressedSizeMB} MB) and logged to Media_Logs.`;
   } catch (err) {
     console.error(err);
-    videoStatus.textContent = "Upload/Compression failed: " + err.message;
-    alert("Failed: " + err.message);
+    videoStatus.textContent = "Upload failed: " + err.message;
+    alert("Upload failed: " + err.message);
   } finally {
     uploadVideoBtn.disabled = false;
   }
