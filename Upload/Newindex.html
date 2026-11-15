@@ -268,7 +268,8 @@ async function openCategory(cat){
   try{
     const r=await post({action:"listProductImages",folderId:FOLDERS[cat]});
     if(!r.success)throw new Error(r.error||"Could not load products.");
-    items=r.files||[];
+    if(!Array.isArray(r.files))throw new Error("Backend not updated. Redeploy the Apps Script as a New version.");
+    items=r.files;
     delStatus.textContent=items.length?"":"No products found in this category.";
     renderThumbs();
   }catch(err){console.error(err);delStatus.textContent="Failed: "+err.message}
